@@ -788,10 +788,10 @@
                       <div className="bg-slate-50 rounded-2xl p-4 md:p-5 mb-6 space-y-3 border border-slate-100">
                         <div className="flex items-start">
                           <span className="text-slate-500 font-semibold w-24 shrink-0">나의 선택:</span>
-                          <span className={`font-bold ${ans.isCorrect ? 'text-emerald-600' : 'text-rose-600'} line-through decoration-rose-400 decoration-2`}>
+                          <span className={`font-bold flex items-center ${ans.isCorrect ? 'text-emerald-600' : 'text-rose-600 line-through decoration-rose-400 decoration-2'}`}>
                             {ans.options[ans.selectedOptionIdx]}
+                            {ans.isCorrect && <Icon name="check-circle" className="w-5 h-5 ml-1.5 inline text-emerald-600" />}
                           </span>
-                          {!ans.isCorrect && <span className="text-rose-600 font-bold ml-1 border-b-0 border-transparent hover:border-transparent cursor-default"></span>}
                         </div>
                         
                         {!ans.isCorrect && (
