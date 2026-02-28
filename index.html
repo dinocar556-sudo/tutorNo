@@ -414,12 +414,19 @@
       }
     ];
 
-    // Icon component helper
+    // Icon component helper (충돌을 방지하기 위해 span으로 격리하여 수정됨)
     const Icon = ({ name, className }) => {
+      const spanRef = useRef(null);
       useEffect(() => {
-        lucide.createIcons();
-      });
-      return <i data-lucide={name} className={className}></i>;
+        if (spanRef.current) {
+          // React의 가상 DOM과 충돌하지 않도록 내부 HTML을 수동으로 제어
+          spanRef.current.innerHTML = `<i data-lucide="${name}" class="${className || ''}"></i>`;
+          lucide.createIcons({ root: spanRef.current });
+        }
+      }, [name, className]);
+      
+      // display: contents를 사용하여 span 태그가 UI 레이아웃에 영향을 주지 않도록 숨김
+      return <span ref={spanRef} style={{ display: 'contents' }}></span>;
     };
 
     function AITutorApp() {
@@ -433,10 +440,6 @@
 
       const resultRef = useRef(null);
       const [isDownloading, setIsDownloading] = useState(false);
-
-      useEffect(() => {
-        lucide.createIcons();
-      });
 
       const handleSelectUnit = (unit) => {
         setSelectedUnit(unit);
@@ -498,7 +501,7 @@
           });
 
           const link = document.createElement('a');
-          link.download = `${selectedUnit.title}_오답노트.png`;
+          link.download = `${selectedUnit.title}_학습리포트.png`;
           link.href = canvas.toDataURL('image/png');
           link.click();
         } catch (error) {
@@ -659,9 +662,22 @@
 
       // 3. 누적 해설 및 개별 피드백 화면
       const renderResult = () => {
+        // 맞춘 문제 계산
         const correctAnswers = userAnswers.filter(a => a.isCorrect).length;
         const totalQuestions = selectedUnit.questions.length;
         const score = Math.round((correctAnswers / totalQuestions) * 100);
+
+        // 강점과 약점 분석 로직
+        const strengths = [];
+        const weaknesses = [];
+
+        userAnswers.forEach(ans => {
+          if (ans.isCorrect) {
+            strengths.push(ans.concept);
+          } else {
+            weaknesses.push(ans.concept);
+          }
+        });
 
         let message = "";
         if (score === 100) message = "완벽해요! 해당 소단원을 마스터했습니다! 🚀";
@@ -672,8 +688,9 @@
           <div className="max-w-4xl mx-auto w-full px-4 py-12 flex flex-col items-center">
             {/* 이미지 캡처 영역 시작 */}
             <div ref={resultRef} className="w-full bg-slate-50 p-2 sm:p-6 rounded-3xl">
+              
               {/* 상단 점수 요약 */}
-              <div className="bg-white w-full rounded-3xl shadow-md p-8 text-center border border-slate-100 mb-8">
+              <div className="bg-white w-full rounded-3xl shadow-sm p-8 text-center border border-slate-200 mb-8">
                 <Icon name="award" className={`w-20 h-20 mx-auto mb-4 ${score === 100 ? 'text-yellow-400' : 'text-indigo-400'}`} />
                 <h2 className="text-3xl font-extrabold text-slate-800 mb-2">
                   학습 완료! ({selectedUnit.title})
@@ -694,6 +711,54 @@
                       {correctAnswers} <span className="text-2xl text-slate-400">/ {totalQuestions}</span>
                     </p>
                   </div>
+                </div>
+              </div>
+
+              {/* [새로 추가된 기능] 학습 분석 리포트 (강점과 약점) */}
+              <div className="w-full bg-white rounded-3xl shadow-sm border-2 border-indigo-100 p-6 md:p-8 mb-8">
+                <h3 className="text-2xl font-bold text-slate-800 mb-6 flex items-center">
+                  <Icon name="bar-chart-2" className="w-6 h-6 mr-2 text-indigo-600" /> 
+                  재혁쌤의 맞춤형 학습 분석 리포트
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* 강점 */}
+                  <div className="bg-emerald-50/50 rounded-2xl p-6 border border-emerald-100">
+                    <h4 className="font-bold text-emerald-800 flex items-center mb-4">
+                      <Icon name="trending-up" className="w-5 h-5 mr-2" /> 훌륭해요! 나의 강점
+                    </h4>
+                    {strengths.length > 0 ? (
+                      <ul className="list-disc list-inside space-y-2 text-emerald-700 font-medium">
+                        {strengths.map((concept, idx) => <li key={`str-${idx}`}>{concept}</li>)}
+                      </ul>
+                    ) : (
+                      <p className="text-emerald-600/70 text-sm">아직은 없지만, 아래 해설을 읽고 나면 모두 강점이 될 거예요!</p>
+                    )}
+                  </div>
+
+                  {/* 약점 */}
+                  <div className="bg-rose-50/50 rounded-2xl p-6 border border-rose-100">
+                    <h4 className="font-bold text-rose-800 flex items-center mb-4">
+                      <Icon name="target" className="w-5 h-5 mr-2" /> 집중 공략! 나의 약점
+                    </h4>
+                    {weaknesses.length > 0 ? (
+                      <ul className="list-disc list-inside space-y-2 text-rose-700 font-medium">
+                        {weaknesses.map((concept, idx) => <li key={`weak-${idx}`}>{concept}</li>)}
+                      </ul>
+                    ) : (
+                      <p className="text-rose-600/70 text-sm">약점이 없네요! 모든 개념을 완벽하게 이해했습니다.</p>
+                    )}
+                  </div>
+                </div>
+                
+                {/* 재혁쌤의 총평 */}
+                <div className="mt-6 p-5 bg-indigo-50 rounded-xl border border-indigo-100 flex items-start">
+                  <Icon name="message-circle" className="w-5 h-5 text-indigo-600 mr-3 shrink-0 mt-0.5" />
+                  <p className="text-indigo-900 font-medium leading-relaxed">
+                    {weaknesses.length === 0 
+                      ? "모든 개념을 완벽하게 마스터했어요! 정말 대단합니다. 바로 다음 소단원으로 넘어가도 좋습니다." 
+                      : `분석 결과, 특히 [ ${weaknesses.join(', ')} ] 개념을 헷갈려 하는 것 같네요. 약점 개념을 보완하기 위해 아래의 문항별 해설과 선생님 피드백을 꼼꼼히 읽어보고, 교과서의 해당 부분을 다시 한번 복습해 보는 것을 추천해요!`}
+                  </p>
                 </div>
               </div>
 
@@ -763,7 +828,7 @@
                 className="w-full sm:w-auto px-8 py-4 rounded-xl text-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Icon name="download" className="w-5 h-5 mr-2" /> 
-                {isDownloading ? '이미지 생성 중...' : '결과 이미지로 저장'}
+                {isDownloading ? '이미지 생성 중...' : '학습 리포트 이미지로 저장'}
               </button>
               <button
                 onClick={() => handleSelectUnit(selectedUnit)}
