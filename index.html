@@ -8,13 +8,14 @@
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   
-  <!-- React, ReactDOM, Babel, html2canvas -->
+  <!-- React, ReactDOM, Babel, html2canvas, jsPDF -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   
-  <!-- Lucide Icons (스크립트 방식) -->
+  <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
   <style>
@@ -414,18 +415,16 @@
       }
     ];
 
-    // Icon component helper (충돌을 방지하기 위해 span으로 격리하여 수정됨)
+    // Icon component helper (충돌 방지)
     const Icon = ({ name, className }) => {
       const spanRef = useRef(null);
       useEffect(() => {
         if (spanRef.current) {
-          // React의 가상 DOM과 충돌하지 않도록 내부 HTML을 수동으로 제어
           spanRef.current.innerHTML = `<i data-lucide="${name}" class="${className || ''}"></i>`;
           lucide.createIcons({ root: spanRef.current });
         }
       }, [name, className]);
       
-      // display: contents를 사용하여 span 태그가 UI 레이아웃에 영향을 주지 않도록 숨김
       return <span ref={spanRef} style={{ display: 'contents' }}></span>;
     };
 
@@ -489,24 +488,82 @@
         setSelectedUnit(null);
       };
 
-      const handleDownloadImage = async () => {
+      // ✅ [완벽 업데이트] 카드를 하나씩 개별적으로 찍어서 빈틈없이 조합하는 무적의 PDF 다운로드 기능
+      const handleDownloadPDF = async () => {
         if (!resultRef.current) return;
         setIsDownloading(true);
 
         try {
-          const canvas = await window.html2canvas(resultRef.current, {
-            scale: 2, 
-            backgroundColor: '#f8fafc',
-            useCORS: true,
-          });
+          const { jsPDF } = window.jspdf;
+          // 세로형(A4) PDF 생성
+          const pdf = new jsPDF('p', 'mm', 'a4');
+          const pdfWidth = 210;
+          const pageHeight = 297;
+          
+          const marginX = 15; // 좌우 여백 15mm
+          const marginY = 15; // 상하 여백 15mm
+          const contentWidth = pdfWidth - marginX * 2;
+          let yPos = marginY;
 
-          const link = document.createElement('a');
-          link.download = `${selectedUnit.title}_학습리포트.png`;
-          link.href = canvas.toDataURL('image/png');
-          link.click();
+          // 배경색(연한 회색)으로 PDF 채우기 함수
+          const fillBackground = () => {
+            pdf.setFillColor(248, 250, 252); // bg-slate-50 색상
+            pdf.rect(0, 0, pdfWidth, pageHeight, 'F');
+          };
+          
+          fillBackground(); // 첫 페이지 배경 칠하기
+
+          const container = resultRef.current;
+          // .pdf-item 이름표가 붙은 카드 요소들만 모두 찾음
+          const items = container.querySelectorAll('.pdf-item');
+          
+          // 임시로 컨테이너 크기를 넓게(800px) 고정하여 모바일 등 좁은 화면에서도 찌그러지지 않게 방어
+          const originalCss = container.style.cssText;
+          container.style.cssText = "width: 800px; max-width: 800px;";
+          
+          // CSS 변경 후 렌더링될 시간을 아주 잠깐 줌
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            
+            // 각 카드 1개씩 고화질로 사진 캡처
+            const canvas = await window.html2canvas(item, {
+              scale: 2, 
+              useCORS: true, 
+              backgroundColor: null // 투명 배경 허용
+            });
+
+            const imgData = canvas.toDataURL('image/png');
+            
+            // 실제 PDF 안에 들어갈 때의 비율(세로 길이) 계산
+            const pdfHeight = (canvas.height * contentWidth) / canvas.width;
+
+            // 만약 이번 카드를 넣었을 때 페이지 하단을 벗어난다면? -> 새 페이지를 만들고 제일 위로 넘김
+            if (yPos + pdfHeight > pageHeight - marginY) {
+              if (i !== 0) { // 첫 번째 요소부터 페이지가 넘치는 경우를 방어
+                pdf.addPage();
+                fillBackground();
+                yPos = marginY; // 새 페이지의 최상단부터 다시 시작
+              }
+            }
+
+            // 계산된 위치에 이미지 삽입
+            pdf.addImage(imgData, 'PNG', marginX, yPos, contentWidth, pdfHeight);
+            
+            // 현재 그린 높이 + 약간의 간격(8mm)을 더해서 다음 항목이 그려질 위치 설정
+            yPos += pdfHeight + 8;
+          }
+
+          // 화면 너비 원상복구
+          container.style.cssText = originalCss;
+
+          // 완성된 PDF 다운로드!
+          pdf.save(`${selectedUnit.title}_학습리포트.pdf`);
+
         } catch (error) {
-          console.error('이미지 저장 실패:', error);
-          alert('이미지를 저장하는 중 문제가 발생했습니다.');
+          console.error('PDF 저장 실패:', error);
+          alert('PDF를 저장하는 중 문제가 발생했습니다.');
         } finally {
           setIsDownloading(false);
         }
@@ -662,12 +719,10 @@
 
       // 3. 누적 해설 및 개별 피드백 화면
       const renderResult = () => {
-        // 맞춘 문제 계산
         const correctAnswers = userAnswers.filter(a => a.isCorrect).length;
         const totalQuestions = selectedUnit.questions.length;
         const score = Math.round((correctAnswers / totalQuestions) * 100);
 
-        // 강점과 약점 분석 로직
         const strengths = [];
         const weaknesses = [];
 
@@ -686,11 +741,12 @@
 
         return (
           <div className="max-w-4xl mx-auto w-full px-4 py-12 flex flex-col items-center">
-            {/* 이미지 캡처 영역 시작 */}
-            <div ref={resultRef} className="w-full bg-slate-50 p-2 sm:p-6 rounded-3xl">
+            
+            {/* 전체 캡처 기준 영역 */}
+            <div ref={resultRef} className="w-full">
               
-              {/* 상단 점수 요약 */}
-              <div className="bg-white w-full rounded-3xl shadow-sm p-8 text-center border border-slate-200 mb-8">
+              {/* 1. 상단 점수 요약 (pdf-item 적용) */}
+              <div className="pdf-item bg-white w-full rounded-3xl shadow-sm p-8 text-center border border-slate-200 mb-8">
                 <Icon name="award" className={`w-20 h-20 mx-auto mb-4 ${score === 100 ? 'text-yellow-400' : 'text-indigo-400'}`} />
                 <h2 className="text-3xl font-extrabold text-slate-800 mb-2">
                   학습 완료! ({selectedUnit.title})
@@ -714,15 +770,14 @@
                 </div>
               </div>
 
-              {/* [새로 추가된 기능] 학습 분석 리포트 (강점과 약점) */}
-              <div className="w-full bg-white rounded-3xl shadow-sm border-2 border-indigo-100 p-6 md:p-8 mb-8">
+              {/* 2. 학습 분석 리포트 (pdf-item 적용) */}
+              <div className="pdf-item w-full bg-white rounded-3xl shadow-sm border-2 border-indigo-100 p-6 md:p-8 mb-8">
                 <h3 className="text-2xl font-bold text-slate-800 mb-6 flex items-center">
                   <Icon name="bar-chart-2" className="w-6 h-6 mr-2 text-indigo-600" /> 
                   재혁쌤의 맞춤형 학습 분석 리포트
                 </h3>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* 강점 */}
                   <div className="bg-emerald-50/50 rounded-2xl p-6 border border-emerald-100">
                     <h4 className="font-bold text-emerald-800 flex items-center mb-4">
                       <Icon name="trending-up" className="w-5 h-5 mr-2" /> 훌륭해요! 나의 강점
@@ -736,7 +791,6 @@
                     )}
                   </div>
 
-                  {/* 약점 */}
                   <div className="bg-rose-50/50 rounded-2xl p-6 border border-rose-100">
                     <h4 className="font-bold text-rose-800 flex items-center mb-4">
                       <Icon name="target" className="w-5 h-5 mr-2" /> 집중 공략! 나의 약점
@@ -751,7 +805,6 @@
                   </div>
                 </div>
                 
-                {/* 재혁쌤의 총평 */}
                 <div className="mt-6 p-5 bg-indigo-50 rounded-xl border border-indigo-100 flex items-start">
                   <Icon name="message-circle" className="w-5 h-5 text-indigo-600 mr-3 shrink-0 mt-0.5" />
                   <p className="text-indigo-900 font-medium leading-relaxed">
@@ -762,73 +815,75 @@
                 </div>
               </div>
 
-              {/* 누적 해설 및 개별 피드백 목록 */}
-              <div className="w-full mb-6">
-                <h3 className="text-2xl font-bold text-slate-800 mb-6 flex items-center">
+              {/* 3. 누적 해설 타이틀 (pdf-item 적용) */}
+              <div className="pdf-item mt-4 mb-4 p-2 bg-transparent">
+                <h3 className="text-2xl font-bold text-slate-800 flex items-center">
                   <Icon name="book-open" className="w-6 h-6 mr-2 text-indigo-600" /> 
                   문항별 누적 해설 및 선생님 피드백
                 </h3>
-                
-                <div className="space-y-6">
-                  {userAnswers.map((ans, idx) => (
-                    <div key={idx} className={`bg-white rounded-3xl p-6 md:p-8 shadow-sm border-2 ${ans.isCorrect ? 'border-emerald-100' : 'border-rose-100'}`}>
-                      <div className="flex items-start justify-between mb-4">
-                        <div className={`px-3 py-1 rounded-md text-sm font-bold ${ans.isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                          {idx + 1}번 문항: {ans.concept}
-                        </div>
-                        {ans.isCorrect ? (
-                          <span className="flex items-center text-emerald-600 font-bold"><Icon name="check-circle" className="w-5 h-5 mr-1"/> 맞았습니다</span>
-                        ) : (
-                          <span className="flex items-center text-rose-600 font-bold"><Icon name="x-circle" className="w-5 h-5 mr-1"/> 틀렸습니다</span>
-                        )}
+              </div>
+              
+              {/* 4. 개별 문제 피드백들 (각각 독립된 pdf-item 적용) */}
+              <div className="flex flex-col gap-6">
+                {userAnswers.map((ans, idx) => (
+                  <div key={idx} className={`pdf-item w-full bg-white rounded-3xl p-6 md:p-8 shadow-sm border-2 ${ans.isCorrect ? 'border-emerald-100' : 'border-rose-100'}`}>
+                    <div className="flex items-start justify-between mb-4">
+                      <div className={`px-3 py-1 rounded-md text-sm font-bold ${ans.isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                        {idx + 1}번 문항: {ans.concept}
+                      </div>
+                      {ans.isCorrect ? (
+                        <span className="flex items-center text-emerald-600 font-bold"><Icon name="check-circle" className="w-5 h-5 mr-1"/> 맞았습니다</span>
+                      ) : (
+                        <span className="flex items-center text-rose-600 font-bold"><Icon name="x-circle" className="w-5 h-5 mr-1"/> 틀렸습니다</span>
+                      )}
+                    </div>
+                    
+                    <h4 className="text-xl font-bold text-slate-800 mb-6">{ans.questionText}</h4>
+                    
+                    <div className="bg-slate-50 rounded-2xl p-4 md:p-5 mb-6 space-y-3 border border-slate-100">
+                      <div className="flex items-start">
+                        <span className="text-slate-500 font-semibold w-24 shrink-0">나의 선택:</span>
+                        <span className={`font-bold flex items-center ${ans.isCorrect ? 'text-emerald-600' : 'text-rose-600 line-through decoration-rose-400 decoration-2'}`}>
+                          {ans.options[ans.selectedOptionIdx]}
+                          {ans.isCorrect && <Icon name="check-circle" className="w-5 h-5 ml-1.5 inline text-emerald-600" />}
+                        </span>
                       </div>
                       
-                      <h4 className="text-xl font-bold text-slate-800 mb-6">{ans.questionText}</h4>
-                      
-                      <div className="bg-slate-50 rounded-2xl p-4 md:p-5 mb-6 space-y-3 border border-slate-100">
+                      {!ans.isCorrect && (
                         <div className="flex items-start">
-                          <span className="text-slate-500 font-semibold w-24 shrink-0">나의 선택:</span>
-                          <span className={`font-bold flex items-center ${ans.isCorrect ? 'text-emerald-600' : 'text-rose-600 line-through decoration-rose-400 decoration-2'}`}>
-                            {ans.options[ans.selectedOptionIdx]}
-                            {ans.isCorrect && <Icon name="check-circle" className="w-5 h-5 ml-1.5 inline text-emerald-600" />}
+                          <span className="text-slate-500 font-semibold w-24 shrink-0">올바른 정답:</span>
+                          <span className="font-bold text-emerald-600 flex items-center">
+                            {ans.options[ans.correctOptionIdx]}
+                            <Icon name="check-circle" className="w-4 h-4 ml-1 inline" />
                           </span>
                         </div>
-                        
-                        {!ans.isCorrect && (
-                          <div className="flex items-start">
-                            <span className="text-slate-500 font-semibold w-24 shrink-0">올바른 정답:</span>
-                            <span className="font-bold text-emerald-600 flex items-center">
-                              {ans.options[ans.correctOptionIdx]}
-                              <Icon name="check-circle" className="w-4 h-4 ml-1 inline" />
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className={`rounded-2xl p-5 ${ans.isCorrect ? 'bg-emerald-50' : 'bg-rose-50'}`}>
-                        <h5 className={`font-bold mb-2 flex items-center ${ans.isCorrect ? 'text-emerald-800' : 'text-rose-800'}`}>
-                          <Icon name="zap" className="w-4 h-4 mr-1" /> 선생님의 맞춤 피드백
-                        </h5>
-                        <p className="text-slate-700 leading-relaxed font-medium">
-                          {ans.feedback}
-                        </p>
-                      </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            {/* 이미지 캡처 영역 끝 */}
 
-            {/* 하단 버튼 */}
-            <div className="flex flex-col sm:flex-row justify-center gap-4 w-full mt-4">
+                    <div className={`rounded-2xl p-5 ${ans.isCorrect ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+                      <h5 className={`font-bold mb-2 flex items-center ${ans.isCorrect ? 'text-emerald-800' : 'text-rose-800'}`}>
+                        <Icon name="zap" className="w-4 h-4 mr-1" /> 선생님의 맞춤 피드백
+                      </h5>
+                      <p className="text-slate-700 leading-relaxed font-medium">
+                        {ans.feedback}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+            </div>
+            {/* 전체 캡처 기준 영역 끝 */}
+
+            {/* 하단 버튼 영역 */}
+            <div className="flex flex-col sm:flex-row justify-center gap-4 w-full mt-10">
               <button
-                onClick={handleDownloadImage}
+                onClick={handleDownloadPDF}
                 disabled={isDownloading}
-                className="w-full sm:w-auto px-8 py-4 rounded-xl text-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full sm:w-auto px-8 py-4 rounded-xl text-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg transition-colors flex items-center justify-center disabled:opacity-50"
               >
                 <Icon name="download" className="w-5 h-5 mr-2" /> 
-                {isDownloading ? '이미지 생성 중...' : '학습 리포트 이미지로 저장'}
+                {isDownloading ? 'PDF 생성 중...' : 'PDF 리포트 저장'}
               </button>
               <button
                 onClick={() => handleSelectUnit(selectedUnit)}
